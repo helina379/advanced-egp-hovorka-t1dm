@@ -50,7 +50,7 @@ class HovorkaConstants:
         self.delta = 0.98e-7                # Delta parameter
         self.Hb = 58.0e-7                   # Basal glucagon
 
-        # Basal insulin input variants (BUGFIX: Populating both lookup types)
+        # Explicitly assign both property variants to resolve any lingering lookup conflicts
         self.u_basal = u_basal            
         self.u0 = u_basal
 
