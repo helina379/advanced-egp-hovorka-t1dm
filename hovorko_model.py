@@ -6,8 +6,10 @@ from hovorka_constants import HovorkaConstants
 class HovorkaModel:
     def __init__(self, BW=70.0, u_basal=12.9127):
         self.c = HovorkaConstants(BW=BW, u_basal=u_basal)
-        # BUGFIX: Storing u_basal explicitly to handle attribute fallbacks cleanly
+        # FORCE FIX: Explicitly bind u_basal directly to the model instance
         self.u_basal = u_basal
+        # Also bind it to the constants container manually to catch all lookup paths
+        self.c.u_basal = u_basal
 
     def meal_input(self, t, meal_times, meal_durations, meal_cho):
         d_cho = 0.0
@@ -43,18 +45,13 @@ class HovorkaModel:
         F01uc = 18.0 * c.F01 / c.Vg if G >= 81.0 else (18.0 * c.F01 * G) / (c.Vg * 81.0)
         Erc = c.ke1 * (G - c.Gth) if G >= c.Gth else 0.0
 
-        # Formulating the change in plasma glucose (dG/dt estimation baseline)
-        # BUGFIX 1: Tracking plasma glucose derivative dynamics for the EGP switch
         rkg11_est = Ugc - F01uc - Erc + (c.k12 * (Gt - c.Gb)) - (x1 * (G - c.Gb))
         rkg21_est = (x1 * (G - c.Gb)) - ((c.k12 + x2) * (Gt - c.Gb))
         
-        # --- 3. Fixed EGP6 Hepatic Subsystem ---
+        # --- 3. EGP6 Hepatic Subsystem ---
         E = (1.0 - np.tanh((t - c.tD) / c.tau)) / 2.0
-        
-        # BUGFIX 2: Encapsulated the complete sum inside brackets so baseline Ggg1b decays correctly
         Ggg = (c.Ggg1b + c.Sc * max(0.0, H - c.Hth)) * E
         
-        # Evaluating switcher on True Plasma Glucose Derivative (rkg11_est) instead of rkg21_est
         if rkg11_est >= 0:
             EGP_val = c.K6gp * G6p - x3 * rkg11_est - c.kp2 * (G - c.Gb)
         else:
@@ -68,7 +65,6 @@ class HovorkaModel:
 
         dG6p = -c.K6gp * G6p + Ggg + c.Ggng1b
         
-        # Glucagon Regulatory Cascade Equations
         if G >= c.Gb:
             Srhs = c.rho * (0.0 - c.n * c.Hb)
         else:
