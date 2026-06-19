@@ -79,6 +79,8 @@ class HovorkaModel:
     def __init__(self, BW=70.0, u_basal=12.9127):
         self.c = HovorkaConstants(BW=BW, u_basal=u_basal)
         self.u_basal = u_basal
+        # BREAKING THE LOOP: Persistence tracking for derivative history step
+        self.prev_dGdt = 0.0
 
     def meal_input(self, t, meal_times, meal_durations, meal_cho):
         d_cho = 0.0
@@ -98,6 +100,11 @@ class HovorkaModel:
         Dm1, Dm2, G, Gt, G6p, H, S1, S2, x1, x2, x3, I = y
         c = self.c
 
+        # Force physical bound protection to prevent underflow drops
+        G = max(10.0, G)
+        G6p = max(0.0, G6p)
+        H = max(0.0, H)
+
         # --- 1. Meal Absorption Subsystem ---
         d_cho = self.meal_input(t, meal_times, meal_durations, meal_cho)
         D_meal = 1000.0 * d_cho / c.Mwg
@@ -110,16 +117,14 @@ class HovorkaModel:
         Ugc = 18.0 * Ug / c.Vg
         F01uc = 18.0 * c.F01 / c.Vg if G >= 81.0 else (18.0 * c.F01 * G) / (c.Vg * 81.0)
         Erc = c.ke1 * (G - c.Gth) if G >= c.Gth else 0.0
-
-        rkg11_est = Ugc - F01uc - Erc + (c.k12 * (Gt - c.Gb)) - (x1 * (G - c.Gb))
-        rkg21_est = (x1 * (G - c.Gb)) - ((c.k12 + x2) * (Gt - c.Gb))
         
-        # --- 3. Fixed EGP6 Hepatic Subsystem ---
+        # --- 3. Stable EGP6 Hepatic Subsystem ---
         E = (1.0 - np.tanh((t - c.tD) / c.tau)) / 2.0
         Ggg = (c.Ggg1b + c.Sc * max(0.0, H - c.Hth)) * E
         
-        if rkg11_est >= 0:
-            EGP_val = c.K6gp * G6p - x3 * rkg11_est - c.kp2 * (G - c.Gb)
+        # Using persistent step-state memory history to safely calculate switching boundaries
+        if self.prev_dGdt >= 0:
+            EGP_val = c.K6gp * G6p - x3 * self.prev_dGdt - c.kp2 * (G - c.Gb)
         else:
             EGP_val = c.K6gp * G6p - c.kp2 * (G - c.Gb)
             
@@ -127,7 +132,7 @@ class HovorkaModel:
 
         # --- 4. System Differential Expressions ---
         dG = Ugc - F01uc - Erc + (c.k12 * (Gt - c.Gb)) - (x1 * (G - c.Gb)) + EGPc
-        dGt = rkg21_est
+        dGt = (x1 * (G - c.Gb)) - ((c.k12 + x2) * (Gt - c.Gb))
 
         dG6p = -c.K6gp * G6p + Ggg + c.Ggng1b
         
@@ -155,11 +160,15 @@ class HovorkaModel:
         # Circulating Plasma Insulin Compartment
         dI = Ui / c.Vi - c.ke * I
 
+        # Update step memory
+        self.prev_dGdt = dG
+
         return [dDm1, dDm2, dG, dGt, dG6p, dH, dS1, dS2, dx1, dx2, dx3, dI]
 
     def simulate(self, meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration=5.0):
         c = self.c
         t_span = np.arange(0, c.MAX_TIME, c.h)
+        self.prev_dGdt = 0.0
 
         y0 = [
             c.Dm1_0, c.Dm2_0,
@@ -199,6 +208,7 @@ class HovorkaModel:
         ax1.set_title('Blood Glucose Profile (EGP6 Hovorka Model)')
         ax1.set_xlabel('Time (minutes)')
         ax1.set_ylabel('Glucose (mg/dL)')
+        ax1.set_ylim(0, 350)  # Bound view to clear clinical window numbers
         ax1.legend(facecolor='#1a1d27', edgecolor='#3a3f4b', loc='upper right')
         ax1.grid(True, color='#2a2f3b', linestyle='--', alpha=0.5)
 
