@@ -17,7 +17,7 @@ class HovorkaConstants:
         self.ke1 = 0.007                    # Glomerular filtration rate (K_e1)
         
         # --- Hepatic EGP Parameters (Table 3) ---
-        self.EGP_b = 1.23                   # Basal value of EGP
+        self.EGP_b = 1.23                   # Basal value of EGP (mg/dl/min)
         self.K6gp = 0.034                   # Rate of dephosphorylation (KG6p)
         self.Ggg1b = 0.7425                 # Basal EGP glycogenolysis contribution
         self.Ggng1b = 0.495                 # Basal EGP glyconeogenesis contribution (G_GNG,b)
@@ -30,6 +30,11 @@ class HovorkaConstants:
         self.n = 0.01                       # Glucagon clearance rate
         self.rho = 0.86                     # Glucagon parameter (P)
         self.Hb = 58.0e-7                   # Basal glucagon
+        
+        # FIXED: Explicitly use her 0.0007 table value for baseline secretion rate!
+        self.SRH_b = 0.0007                 
+        self.delta = 0.98e-7                # Delta parameter
+        self.sigma = 1.714410e-11           # Sigma parameter
         
         # --- Insulin Subsystem Parameters (Table 4) ---
         self.Vi = 0.12 * BW                 # Distribution volume of insulin
@@ -54,7 +59,7 @@ class HovorkaConstants:
         self.u_basal = u_basal            
         self.u0 = u_basal
 
-        # --- VERIFIED INITIAL CONDITIONS (Page 12 Formulas) ---
+        # --- INITIAL CONDITIONS (Page 12 Formulas) ---
         self.S1_0 = u_basal * self.tau_s    # s1(0) = tau_s * u(0)
         self.S2_0 = u_basal * self.tau_s    # s2(0) = tau_s * u(0)
         self.I_0 = u_basal / (0.01656 * BW) # I(0) = u(0) / (0.01656 * BW)
@@ -63,11 +68,11 @@ class HovorkaConstants:
         self.x3_0 = 3.2206 * u_basal / BW   # x3(0) = 3.2206 * u(0) / BW
         
         self.G_0 = 90.0                     # G(0) = 90 mg/dL
-        self.Gt_0 = 70.0                    # G1(0) = 70 mg/dL (VERIFIED FROM TABLE 2)
+        self.Gt_0 = 70.0                    # G1(0) = 70 mg/dL
         self.Dm1_0 = 0.0
         self.Dm2_0 = 0.0
-        self.G6p_0 = (self.EGP_b / self.K6gp) + self.g6po  # G6P(0) formula verified from Eq. 13
-        self.H_0 = 58.0e-7                  # Basal glucagon state
+        self.G6p_0 = (self.EGP_b / self.K6gp) + self.g6po  # G6P(0) formula Eq. 13
+        self.H_0 = self.Hb                  
 
         self.MAX_TIME = 1440              
         self.h = 0.1                        
@@ -130,9 +135,7 @@ class HovorkaModel:
                 
             EGPc = 18.0 * (EGP_val / c.Vg)
         else:
-            # Classic Hovorka comparison baseline
-            EGP_val = c.EGP_b * np.exp(-x3)
-            EGPc = 18.0 * EGP_val / c.Vg
+            EGPc = c.EGP_b * np.exp(-x3)
             dG6p = 0.0
 
         # --- 4. Differential Equations ---
@@ -141,10 +144,9 @@ class HovorkaModel:
         
         if model_type == "proposed":
             if G >= c.Gb:
-                Srhs = c.rho * (0.0 - c.n * c.Hb)
+                Srhs = c.rho * (0.0 - c.SRH_b)
             else:
-                Srhb_calc = c.n * c.Hb
-                Srhs = c.rho * (0.0 - max(c.sigma * (c.Gth1 - G) / (I + 1.0) + Srhb_calc, 0.0))
+                Srhs = c.rho * (0.0 - max(c.sigma * (c.Gth1 - G) / (I + 1.0) + c.SRH_b, 0.0))
             Srhd = c.delta * max(-dG, 0.0)
             dH = -c.n * H + (Srhs + Srhd)
         else:
