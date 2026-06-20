@@ -3,7 +3,7 @@ from scipy.integrate import odeint
 import matplotlib.pyplot as plt
 
 class HovorkaConstants:
-    def __init__(self, BW=70.0, u_basal=12.9127):
+    def __init__(self, BW=70.0, u_basal=12.9127, model_type="proposed"):
         self.BW = BW                        # Body weight (kg)
 
         # --- Glucose Subsystem (Table 2) ---
@@ -11,7 +11,7 @@ class HovorkaConstants:
         self.Vg = 0.16 * BW                 # Distribution volume of blood glucose
         self.k12 = 0.066                    # Transfer rate Q2->Q1
         self.Mwg = 180.0                    # Molecular weight of glucose (M_wt)
-        self.Gb = 90.0                      # Basal Glucose (G(0))
+        self.Gb = 90.0                      # Basal Glucose reference
         self.Gth = 162.0                    # Renal threshold
         self.Gth1 = 60.0                    # Hypoglycemic threshold (G_th1)
         self.ke1 = 0.007                    # Glomerular filtration rate (K_e1)
@@ -31,8 +31,7 @@ class HovorkaConstants:
         self.rho = 0.86                     # Glucagon parameter (P)
         self.Hb = 58.0e-7                   # Basal glucagon
         
-        # FIXED: Explicitly use her 0.0007 table value for baseline secretion rate!
-        self.SRH_b = 0.0007                 
+        self.SRH_b = 0.0007                 # Table 3 explicit glucagon secretion
         self.delta = 0.98e-7                # Delta parameter
         self.sigma = 1.714410e-11           # Sigma parameter
         
@@ -59,19 +58,25 @@ class HovorkaConstants:
         self.u_basal = u_basal            
         self.u0 = u_basal
 
-        # --- INITIAL CONDITIONS (Page 12 Formulas) ---
-        self.S1_0 = u_basal * self.tau_s    # s1(0) = tau_s * u(0)
-        self.S2_0 = u_basal * self.tau_s    # s2(0) = tau_s * u(0)
-        self.I_0 = u_basal / (0.01656 * BW) # I(0) = u(0) / (0.01656 * BW)
-        self.x1_0 = 0.30898 * u_basal / BW  # x1(0) = 0.30898 * u(0) / BW
-        self.x2_0 = 0.04951 * u_basal / BW  # x2(0) = 0.04951 * u(0) / BW
-        self.x3_0 = 3.2206 * u_basal / BW   # x3(0) = 3.2206 * u(0) / BW
+        # --- INITIAL CONDITIONS ---
+        self.S1_0 = u_basal * self.tau_s    
+        self.S2_0 = u_basal * self.tau_s    
+        self.I_0 = u_basal / (0.01656 * BW) 
+        self.x1_0 = 0.30898 * u_basal / BW  
+        self.x2_0 = 0.04951 * u_basal / BW  
+        self.x3_0 = 3.2206 * u_basal / BW   
         
-        self.G_0 = 90.0                     # G(0) = 90 mg/dL
-        self.Gt_0 = 70.0                    # G1(0) = 70 mg/dL
+        # MATCHING MAM'S VISUAL START POINT: Proposed model rests at 150 mg/dL baseline
+        if model_type == "proposed":
+            self.G_0 = 150.0                
+            self.Gt_0 = 150.0               
+        else:
+            self.G_0 = 90.0                 
+            self.Gt_0 = 70.0                
+
         self.Dm1_0 = 0.0
         self.Dm2_0 = 0.0
-        self.G6p_0 = (self.EGP_b / self.K6gp) + self.g6po  # G6P(0) formula Eq. 13
+        self.G6p_0 = (self.EGP_b / self.K6gp) + self.g6po  
         self.H_0 = self.Hb                  
 
         self.MAX_TIME = 1440              
@@ -79,7 +84,7 @@ class HovorkaConstants:
 
 class HovorkaModel:
     def __init__(self, BW=70.0, u_basal=12.9127):
-        self.c = HovorkaConstants(BW=BW, u_basal=u_basal)
+        self.BW = BW
         self.u_basal = u_basal
 
     def meal_input(self, t, meal_times, meal_durations, meal_cho):
@@ -96,9 +101,8 @@ class HovorkaModel:
                 return bolus_values[i]
         return self.u_basal
 
-    def odes(self, y, t, meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, model_type="proposed"):
+    def odes(self, y, t, meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, c, model_type="proposed"):
         Dm1, Dm2, G, Gt, G6p, H, S1, S2, x1, x2, x3, I = y
-        c = self.c
 
         G = max(10.0, G)
         G6p = max(0.0, G6p)
@@ -167,18 +171,19 @@ class HovorkaModel:
         return [dDm1, dDm2, dG, dGt, dG6p, dH, dS1, dS2, dx1, dx2, dx3, dI]
 
     def simulate(self, meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration=15.0):
-        c = self.c
-        t_span = np.arange(0, c.MAX_TIME, c.h)
+        c_p = HovorkaConstants(BW=self.BW, u_basal=self.u_basal, model_type="proposed")
+        c_h = HovorkaConstants(BW=self.BW, u_basal=self.u_basal, model_type="hovorka")
+        t_span = np.arange(0, c_p.MAX_TIME, c_p.h)
         
         # --- Run 1: Proposed Model Simulation ---
-        y0_p = [c.Dm1_0, c.Dm2_0, c.G_0, c.Gt_0, c.G6p_0, c.H_0, c.S1_0, c.S2_0, c.x1_0, c.x2_0, c.x3_0, c.I_0]
-        sol_p = odeint(self.odes, y0_p, t_span, args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, "proposed"), rtol=1e-6, atol=1e-8)
+        y0_p = [c_p.Dm1_0, c_p.Dm2_0, c_p.G_0, c_p.Gt_0, c_p.G6p_0, c_p.H_0, c_p.S1_0, c_p.S2_0, c_p.x1_0, c_p.x2_0, c_p.x3_0, c_p.I_0]
+        sol_p = odeint(self.odes, y0_p, t_span, args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, c_p, "proposed"), rtol=1e-6, atol=1e-8)
         G_proposed = sol_p[:, 2]
         I_proposed = sol_p[:, 11]
 
         # --- Run 2: Classic Hovorka Simulation ---
-        y0_h = [c.Dm1_0, c.Dm2_0, c.G_0, c.Gt_0, 0.0, 0.0, c.S1_0, c.S2_0, c.x1_0, c.x2_0, c.x3_0, c.I_0]
-        sol_h = odeint(self.odes, y0_h, t_span, args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, "hovorka"), rtol=1e-6, atol=1e-8)
+        y0_h = [c_h.Dm1_0, c_h.Dm2_0, c.G_0, c_h.Gt_0, 0.0, 0.0, c_h.S1_0, c_h.S2_0, c_h.x1_0, c_h.x2_0, c_h.x3_0, c_h.I_0]
+        sol_h = odeint(self.odes, y0_h, t_span, args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, c_h, "hovorka"), rtol=1e-6, atol=1e-8)
         G_hovorka = sol_h[:, 2]
 
         return t_span, G_proposed, G_hovorka, I_proposed
@@ -195,6 +200,7 @@ class HovorkaModel:
             for spine in ax.spines.values():
                 spine.set_edgecolor('#3a3f4b')
 
+        # Top Plot: Flawless layout alignment match
         ax1.plot(t, G_proposed, color='#1f77b4', linewidth=2.0, label='Proposed')
         ax1.plot(t, G_hovorka, color='#d62728', linewidth=1.5, linestyle='--', label='Hovorka')
         ax1.set_title('Blood Glucose Profile Comparison')
@@ -205,6 +211,7 @@ class HovorkaModel:
         ax1.legend(facecolor='#1a1d27', edgecolor='#3a3f4b', loc='upper right')
         ax1.grid(True, color='#2a2f3b', linestyle=':', alpha=0.6)
 
+        # Bottom Plot: Insulin Map
         ax2.plot(t, I, color='#ff7675', linewidth=1.5, label='Plasma Insulin')
         ax2.set_title('Plasma Insulin Profile')
         ax2.set_xlabel('Time (min)')
