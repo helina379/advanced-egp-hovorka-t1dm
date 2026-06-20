@@ -79,7 +79,6 @@ class HovorkaModel:
     def __init__(self, BW=70.0, u_basal=12.9127):
         self.c = HovorkaConstants(BW=BW, u_basal=u_basal)
         self.u_basal = u_basal
-        self.prev_dGdt = 0.0
 
     def meal_input(self, t, meal_times, meal_durations, meal_cho):
         d_cho = 0.0
@@ -111,30 +110,39 @@ class HovorkaModel:
         dDm2 = Dm1 / c.tau_d - Dm2 / c.tau_d
         Ug = Dm2 / c.tau_d
 
-        # --- 2. Glucose Scaling ---
+        # --- 2. Glucose Scaling & Kinetics ---
         Ugc = 18.0 * Ug / c.Vg
         F01uc = 18.0 * c.F01 / c.Vg if G >= 81.0 else (18.0 * c.F01 * G) / (c.Vg * 81.0)
         Erc = c.ke1 * (G - c.Gth) if G >= c.Gth else 0.0
+        
+        # Kinetic base movement (B)
+        B = Ugc - F01uc - Erc + (c.k12 * (Gt - c.Gb)) - (x1 * (G - c.Gb))
         
         # --- 3. Hepatic EGP Choice ---
         if model_type == "proposed":
             E = (1.0 - np.tanh((t - c.tD) / c.tau)) / 2.0
             Ggg = (c.Ggg1b + c.Sc * max(0.0, H - c.Hth)) * E
-            
-            if self.prev_dGdt >= 0:
-                EGP_val = c.K6gp * G6p - x3 * self.prev_dGdt - c.kp2 * (G - c.Gb)
-            else:
-                EGP_val = c.K6gp * G6p - c.kp2 * (G - c.Gb)
-            EGPc = 18.0 * (EGP_val / c.Vg)
             dG6p = -c.K6gp * G6p + Ggg + c.Ggng1b
+            
+            EGP_base = c.K6gp * G6p - c.kp2 * (G - c.Gb)
+            
+            # Pure algebraic lookahead breakdown to avoid feedback loop instability
+            dGdt_positive_regime = (B + 18.0 * EGP_base / c.Vg) / (1.0 + 18.0 * x3 / c.Vg)
+            
+            if dGdt_positive_regime >= 0:
+                EGP_val = EGP_base - x3 * dGdt_positive_regime
+            else:
+                EGP_val = EGP_base
+                
+            EGPc = 18.0 * (EGP_val / c.Vg)
         else:
-            # Classic Hovorka baseline model: Direct exponential suppression via x3
+            # Classic Hovorka baseline model
             EGP_val = c.EGP_b * np.exp(-x3)
             EGPc = 18.0 * EGP_val / c.Vg
             dG6p = 0.0
 
         # --- 4. Differential Expressions ---
-        dG = Ugc - F01uc - Erc + (c.k12 * (Gt - c.Gb)) - (x1 * (G - c.Gb)) + EGPc
+        dG = B + EGPc
         dGt = (x1 * (G - c.Gb)) - ((c.k12 + x2) * (Gt - c.Gb))
         
         if model_type == "proposed":
@@ -148,7 +156,7 @@ class HovorkaModel:
         else:
             dH = 0.0
 
-        # Insulin Subcutaneous Channel
+        # Subcutaneous Channel
         u = self.insulin_input(t, bolus_times, bolus_values, bolus_duration)
         dS1 = u - S1 * c.k21
         dS2 = (c.k21 * S1) - ((c.kd + c.ka) * S2)
@@ -160,8 +168,6 @@ class HovorkaModel:
         dx3 = -c.ka3 * x3 + c.kb3 * I
         dI = Ui / c.Vi - c.ke * I
 
-        self.prev_dGdt = dG
-
         return [dDm1, dDm2, dG, dGt, dG6p, dH, dS1, dS2, dx1, dx2, dx3, dI]
 
     def simulate(self, meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration=5.0):
@@ -169,14 +175,12 @@ class HovorkaModel:
         t_span = np.arange(0, c.MAX_TIME, c.h)
         
         # --- Run 1: Proposed Model Simulation ---
-        self.prev_dGdt = 0.0
         y0_p = [c.Dm1_0, c.Dm2_0, c.G_0, c.Gt_0, c.G6p_0, c.H_0, c.S1_0, c.S2_0, c.x1_0, c.x2_0, c.x3_0, c.I_0]
         sol_p = odeint(self.odes, y0_p, t_span, args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, "proposed"), rtol=1e-6, atol=1e-8)
         G_proposed = sol_p[:, 2]
         I_proposed = sol_p[:, 11]
 
         # --- Run 2: Classic Hovorka Simulation ---
-        self.prev_dGdt = 0.0
         y0_h = [c.Dm1_0, c.Dm2_0, c.G_0, c.Gt_0, 0.0, 0.0, c.S1_0, c.S2_0, c.x1_0, c.x2_0, c.x3_0, c.I_0]
         sol_h = odeint(self.odes, y0_h, t_span, args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, "hovorka"), rtol=1e-6, atol=1e-8)
         G_hovorka = sol_h[:, 2]
@@ -201,7 +205,7 @@ class HovorkaModel:
         ax1.set_title('Blood Glucose Profile Comparison')
         ax1.set_xlabel('Time (min)')
         ax1.set_ylabel('Glucose (mg/dl)')
-        ax1.set_xlim(0, 1500)
+        ax1.set_xlim(0, 1440)
         ax1.set_ylim(50, 300)
         ax1.legend(facecolor='#1a1d27', edgecolor='#3a3f4b', loc='upper right')
         ax1.grid(True, color='#2a2f3b', linestyle=':', alpha=0.6)
