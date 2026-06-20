@@ -6,72 +6,69 @@ class HovorkaConstants:
     def __init__(self, BW=70.0, u_basal=12.9127):
         self.BW = BW                        # Body weight (kg)
 
-        # Glucose subsystem
-        self.F01 = 0.00097 * BW             # Non-insulin dependent glucose flux
-        self.Vg = 0.16 * BW                 # Distribution volume of glucose (L)
-        self.k12 = 0.066                    # Transfer rate Q2->Q1 (min^-1)
-        self.Mwg = 180.0                    # Molecular weight of glucose (g/mol)
-        self.Gb = 90.0                      # Basal Glucose (mg/dL)
-        self.Gth = 162.0                    # Renal threshold (mg/dL)
-        self.Gth1 = 60.0                    # Hypoglycemic threshold (mg/dL)
+        # --- Glucose Subsystem (Table 2) ---
+        self.F01 = 0.00097 * BW             # Insulin-independent glucose flux (F_ii)
+        self.Vg = 0.16 * BW                 # Distribution volume of blood glucose
+        self.k12 = 0.066                    # Transfer rate Q2->Q1
+        self.Mwg = 180.0                    # Molecular weight of glucose (M_wt)
+        self.Gb = 90.0                      # Basal Glucose (G(0))
+        self.Gth = 162.0                    # Renal threshold
+        self.Gth1 = 60.0                    # Hypoglycemic threshold (G_th1)
+        self.ke1 = 0.007                    # Glomerular filtration rate (K_e1)
         
-        # Rates from EGP model spec
+        # --- Hepatic EGP Parameters (Table 3) ---
+        self.EGP_b = 1.23                   # Basal value of EGP
+        self.K6gp = 0.034                   # Rate of dephosphorylation (KG6p)
+        self.Ggg1b = 0.7425                 # Basal EGP glycogenolysis contribution
+        self.Ggng1b = 0.495                 # Basal EGP glyconeogenesis contribution (G_GNG,b)
+        self.Sc = 297.0                     # Sensitivity of glycogenolysis to glucagon
+        self.Hth = 80.0e-7                  # Plasma glucagon threshold value
+        self.tD = 59.90                     # Time of onset of evanescence
+        self.tau = 23.24                    # Time constant of evanescence effect (T)
+        self.g6po = 5.50                    # Rapid increase parameter
         self.kp2 = 0.0007                   # Liver glucose effectiveness
-        self.ke1 = 0.007                    # Glomerular filtration rate
-        self.EGP_b = 0.65                   # Calibrated classic Hovorka baseline matching Mam's plot
+        self.n = 0.01                       # Glucagon clearance rate
+        self.rho = 0.86                     # Glucagon parameter (P)
+        self.Hb = 58.0e-7                   # Basal glucagon
         
-        # Insulin subsystem
-        self.Vi = 0.12 * BW                 # Distribution volume of insulin (L)
-        self.tau_s = 55.0                   # Time constant for SC insulin absorption (min)
-        self.ke = 0.138                     # Insulin elimination rate (min^-1)
-        self.k21 = 0.045                    # Inter-compartmental insulin transfer rate
+        # --- Insulin Subsystem Parameters (Table 4) ---
+        self.Vi = 0.12 * BW                 # Distribution volume of insulin
+        self.tau_s = 55.0                   # Time constant for insulin absorption
+        self.ke = 0.138                     # Fractional elimination rate of insulin
+        self.k21 = 0.045                    # Inter-compartmental transfer rate
         self.kd = 0.0021                    
         self.ka = 0.02                      
 
-        # Meal absorption
-        self.Ag = 0.8                       # CHO bioavailability
-        self.tau_d = 40.0                   # Time constant for meal absorption (min)
+        # --- Meal Absorption Parameters (Table 2) ---
+        self.Ag = 0.8                       # Carbohydrate utilization factor
+        self.tau_d = 40.0                   # Meal absorption time constant (TD)
 
-        # Insulin action
-        self.ka1 = 0.006                    # Deactivation rate x1 (min^-1)
-        self.ka2 = 0.06                     # Deactivation rate x2 (min^-1)
-        self.ka3 = 0.03                     # Deactivation rate x3 (min^-1)
-        self.kb1 = 3.072e-5                 # Activation Rate constants
-        self.kb2 = 4.92e-5                  
-        self.kb3 = 0.00156                  
-
-        # EGP Hepatic Subsystem Parameters
-        self.K6gp = 0.034                   
-        self.Sc = 297.0                     
-        self.Hth = 80.0e-7                  # Glucagon threshold value
-        self.tD = 59.90                     # Time of onset of evanescence
-        self.tau = 23.24                    # Time constant of evanescence
-        self.Ggng1b = 0.495                 # Basal glyconeogenesis
-        self.Ggg1b = 0.7425                 # Basal glycogenolysis
-        self.n = 0.01                       # Glucagon clearance rate
-        self.rho = 0.86                     
-        self.sigma = 1.714410e-11           # Sigma scale parameter
-        self.delta = 0.98e-7                # Delta parameter
-        self.Hb = 58.0e-7                   # Basal glucagon
+        # --- Insulin Action Parameters (Table 4) ---
+        self.ka1 = 0.006                    # Deactivation rate x1
+        self.ka2 = 0.06                     # Deactivation rate x2
+        self.ka3 = 0.03                     # Deactivation rate x3
+        self.kb1 = 3.072e-5                 # Activation rate constant
+        self.kb2 = 4.92e-5                  # Activation rate constant
+        self.kb3 = 0.00156                  # Activation rate constant
 
         self.u_basal = u_basal            
         self.u0 = u_basal
 
-        # Initial conditions
-        self.S1_0 = u_basal * self.tau_s    
-        self.S2_0 = u_basal * self.tau_s    
-        self.I_0 = u_basal / (0.01656 * BW) 
-        self.x1_0 = 0.30898 * u_basal / BW  
-        self.x2_0 = 0.04951 * u_basal / BW  
-        self.x3_0 = 3.2206 * u_basal / BW   
-        self.G_0 = 90.0                     
-        self.Gt_0 = 90.0                    
+        # --- VERIFIED INITIAL CONDITIONS (Page 12 Formulas) ---
+        self.S1_0 = u_basal * self.tau_s    # s1(0) = tau_s * u(0)
+        self.S2_0 = u_basal * self.tau_s    # s2(0) = tau_s * u(0)
+        self.I_0 = u_basal / (0.01656 * BW) # I(0) = u(0) / (0.01656 * BW)
+        self.x1_0 = 0.30898 * u_basal / BW  # x1(0) = 0.30898 * u(0) / BW
+        self.x2_0 = 0.04951 * u_basal / BW  # x2(0) = 0.04951 * u(0) / BW
+        self.x3_0 = 3.2206 * u_basal / BW   # x3(0) = 3.2206 * u(0) / BW
+        
+        self.G_0 = 90.0                     # G(0) = 90 mg/dL
+        self.Gt_0 = 70.0                    # G1(0) = 70 mg/dL (VERIFIED FROM TABLE 2)
         self.Dm1_0 = 0.0
         self.Dm2_0 = 0.0
-        self.G6p_0 = 41.897                 
-        self.H_0 = 58.0e-7                  
+        self.G6p_0 = (self.EGP_b / self.K6gp) + self.g6po  # G6P(0) formula verified from Eq. 13
+        self.H_0 = 58.0e-7                  # Basal glucagon state
 
-        # Simulation Configuration
         self.MAX_TIME = 1440              
         self.h = 0.1                        
 
@@ -124,8 +121,6 @@ class HovorkaModel:
             dG6p = -c.K6gp * G6p + Ggg + c.Ggng1b
             
             EGP_base = c.K6gp * G6p - c.kp2 * (G - c.Gb)
-            
-            # Algebraic lookahead to secure absolute solver stability
             dGdt_pos = (B + 18.0 * EGP_base / c.Vg) / (1.0 + 18.0 * x3 / c.Vg)
             
             if dGdt_pos >= 0:
@@ -140,7 +135,7 @@ class HovorkaModel:
             EGPc = 18.0 * EGP_val / c.Vg
             dG6p = 0.0
 
-        # --- 4. Differential Expressions ---
+        # --- 4. Differential Equations ---
         dG = B + EGPc
         dGt = (x1 * (G - c.Gb)) - ((c.k12 + x2) * (Gt - c.Gb))
         
@@ -155,13 +150,13 @@ class HovorkaModel:
         else:
             dH = 0.0
 
-        # Subcutaneous Insulin Channels (Unified & Stable)
+        # Subcutaneous Insulin Channels
         u = self.insulin_input(t, bolus_times, bolus_values, bolus_duration)
         dS1 = u - S1 / c.tau_s
         dS2 = (S1 - S2) / c.tau_s
         Ui = S2 / c.tau_s
 
-        # Actions & Circulating Plasma Insulin
+        # Actions & Plasma Clearances
         dx1 = -c.ka1 * x1 + c.kb1 * I
         dx2 = -c.ka2 * x2 + c.kb2 * I
         dx3 = -c.ka3 * x3 + c.kb3 * I
@@ -198,7 +193,6 @@ class HovorkaModel:
             for spine in ax.spines.values():
                 spine.set_edgecolor('#3a3f4b')
 
-        # Top Plot: Exact replica of Mam's target curve positions
         ax1.plot(t, G_proposed, color='#1f77b4', linewidth=2.0, label='Proposed')
         ax1.plot(t, G_hovorka, color='#d62728', linewidth=1.5, linestyle='--', label='Hovorka')
         ax1.set_title('Blood Glucose Profile Comparison')
@@ -209,7 +203,6 @@ class HovorkaModel:
         ax1.legend(facecolor='#1a1d27', edgecolor='#3a3f4b', loc='upper right')
         ax1.grid(True, color='#2a2f3b', linestyle=':', alpha=0.6)
 
-        # Bottom Plot: Insulin Map
         ax2.plot(t, I, color='#ff7675', linewidth=1.5, label='Plasma Insulin')
         ax2.set_title('Plasma Insulin Profile')
         ax2.set_xlabel('Time (min)')
