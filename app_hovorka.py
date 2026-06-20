@@ -35,7 +35,7 @@ with c2:
 st.markdown("<div class='section-header'><h2 style='margin:0;'>Scenario Configuration</h2></div>", unsafe_allow_html=True)
 c3, c4 = st.columns(2)
 with c3:
-    num_meals = st.number_input("Number of Meals", min_value=1, max_value=5, value=3, step=1)
+    num_meals = st.number_input("Number of Meals", min_value=1, max_value=5, value=5, step=1)
 with c4:
     bolus_duration = st.number_input("Bolus Infusion Duration (minutes)", min_value=1.0, max_value=30.0, value=5.0, step=1.0)
 
@@ -48,10 +48,11 @@ meal_cho = []
 bolus_times = []
 bolus_values = []
 
-# Default scenarios for 3 meals
-default_times = [420.0, 780.0, 1200.0]  # 7:00, 13:00, 20:00
-default_cho = [60.0, 80.0, 70.0]
-default_bolus = [6000.0, 8000.0, 7000.0]
+# Exact reference schedules matching Mam's Table 5 and Table 6
+default_times = [480.0, 780.0, 960.0, 1140.0, 1380.0]  # 8:00 AM, 1:00 PM, 4:00 PM, 7:00 PM, 11:00 PM
+default_durations = [10.0, 20.0, 10.0, 20.0, 10.0]
+default_cho = [124.17, 34.5, 34.5, 76.95, 34.5]
+default_bolus = [700.0, 250.0, 200.0, 490.0, 210.0]
 
 header_cols = st.columns([1, 1.5, 1.5, 1.5, 1.5])
 header_cols[0].markdown("**Meal #**")
@@ -61,15 +62,16 @@ header_cols[3].markdown("**Carbs (g)**")
 header_cols[4].markdown("**Insulin Bolus (mU/min)**")
 
 for i in range(int(num_meals)):
-    m_t = default_times[i] if i < len(default_times) else default_times[-1] + 240.0 * (i - len(default_times) + 1)
-    m_c = default_cho[i] if i < len(default_cho) else 60.0
-    b_v = default_bolus[i] if i < len(default_bolus) else 6000.0
+    m_t = default_times[i] if i < len(default_times) else default_times[-1] + 120.0
+    m_d = default_durations[i] if i < len(default_durations) else 10.0
+    m_c = default_cho[i] if i < len(default_cho) else 34.5
+    b_v = default_bolus[i] if i < len(default_bolus) else 200.0
     
     row_cols = st.columns([1, 1.5, 1.5, 1.5, 1.5])
     row_cols[0].markdown(f"<h5 style='margin:10px 0;'>Meal {i+1}</h5>", unsafe_allow_html=True)
     
     meal_times.append(row_cols[1].number_input(f"Time {i}", min_value=0.0, max_value=1440.0, value=m_t, step=10.0, key=f"mt_{i}", label_visibility="collapsed"))
-    meal_durations.append(row_cols[2].number_input(f"Duration {i}", min_value=1.0, max_value=120.0, value=15.0, step=5.0, key=f"md_{i}", label_visibility="collapsed"))
+    meal_durations.append(row_cols[2].number_input(f"Duration {i}", min_value=1.0, max_value=120.0, value=m_d, step=5.0, key=f"md_{i}", label_visibility="collapsed"))
     meal_cho.append(row_cols[3].number_input(f"Carbs {i}", min_value=0.0, max_value=200.0, value=m_c, step=5.0, key=f"mc_{i}", label_visibility="collapsed"))
     
     bolus_times.append(meal_times[-1])
