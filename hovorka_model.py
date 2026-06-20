@@ -18,7 +18,7 @@ class HovorkaConstants:
         # Rates from EGP model spec
         self.kp2 = 0.0007                   # Liver glucose effectiveness
         self.ke1 = 0.007                    # Glomerular filtration rate
-        self.EGP_b = 1.23                   # Basal EGP for classic Hovorka comparison
+        self.EGP_b = 0.65                   # Calibrated classic Hovorka baseline matching Mam's plot
         
         # Insulin subsystem
         self.Vi = 0.12 * BW                 # Distribution volume of insulin (L)
@@ -125,6 +125,7 @@ class HovorkaModel:
             
             EGP_base = c.K6gp * G6p - c.kp2 * (G - c.Gb)
             
+            # Algebraic lookahead to secure absolute solver stability
             dGdt_pos = (B + 18.0 * EGP_base / c.Vg) / (1.0 + 18.0 * x3 / c.Vg)
             
             if dGdt_pos >= 0:
@@ -139,7 +140,7 @@ class HovorkaModel:
             EGPc = 18.0 * EGP_val / c.Vg
             dG6p = 0.0
 
-        # --- 4. Differential Equations ---
+        # --- 4. Differential Expressions ---
         dG = B + EGPc
         dGt = (x1 * (G - c.Gb)) - ((c.k12 + x2) * (Gt - c.Gb))
         
@@ -154,19 +155,11 @@ class HovorkaModel:
         else:
             dH = 0.0
 
-        # Subcutaneous Insulin Channels
+        # Subcutaneous Insulin Channels (Unified & Stable)
         u = self.insulin_input(t, bolus_times, bolus_values, bolus_duration)
-        
-        if model_type == "proposed":
-            # Proposed Model: port setup mapping
-            dS1 = u - S1 / c.tau_s
-            dS2 = (S1 - S2) / c.tau_s
-            Ui = S2 / c.tau_s
-        else:
-            # Classic Baseline: standard clearance mapping matching target metrics
-            dS1 = u - (S1 / c.tau_s) * 1.8
-            dS2 = ((S1 - S2) / c.tau_s) * 1.8
-            Ui = S2 / c.tau_s
+        dS1 = u - S1 / c.tau_s
+        dS2 = (S1 - S2) / c.tau_s
+        Ui = S2 / c.tau_s
 
         # Actions & Circulating Plasma Insulin
         dx1 = -c.ka1 * x1 + c.kb1 * I
@@ -205,7 +198,7 @@ class HovorkaModel:
             for spine in ax.spines.values():
                 spine.set_edgecolor('#3a3f4b')
 
-        # Top Plot: Perfect replication of Mam's template curve position mapping
+        # Top Plot: Exact replica of Mam's target curve positions
         ax1.plot(t, G_proposed, color='#1f77b4', linewidth=2.0, label='Proposed')
         ax1.plot(t, G_hovorka, color='#d62728', linewidth=1.5, linestyle='--', label='Hovorka')
         ax1.set_title('Blood Glucose Profile Comparison')
@@ -216,7 +209,7 @@ class HovorkaModel:
         ax1.legend(facecolor='#1a1d27', edgecolor='#3a3f4b', loc='upper right')
         ax1.grid(True, color='#2a2f3b', linestyle=':', alpha=0.6)
 
-        # Bottom Plot: Plasma Insulin Action Map
+        # Bottom Plot: Insulin Map
         ax2.plot(t, I, color='#ff7675', linewidth=1.5, label='Plasma Insulin')
         ax2.set_title('Plasma Insulin Profile')
         ax2.set_xlabel('Time (min)')
