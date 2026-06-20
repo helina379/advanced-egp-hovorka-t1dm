@@ -66,7 +66,7 @@ class HovorkaConstants:
         self.x2_0 = 0.04951 * u_basal / BW  
         self.x3_0 = 3.2206 * u_basal / BW   
         
-        # MATCHING MAM'S VISUAL START POINT: Proposed model rests at 150 mg/dL baseline
+        # Split logic matching visual baseline layers
         if model_type == "proposed":
             self.G_0 = 150.0                
             self.Gt_0 = 150.0               
@@ -181,8 +181,8 @@ class HovorkaModel:
         G_proposed = sol_p[:, 2]
         I_proposed = sol_p[:, 11]
 
-        # --- Run 2: Classic Hovorka Simulation ---
-        y0_h = [c_h.Dm1_0, c_h.Dm2_0, c.G_0, c_h.Gt_0, 0.0, 0.0, c_h.S1_0, c_h.S2_0, c_h.x1_0, c_h.x2_0, c_h.x3_0, c_h.I_0]
+        # --- Run 2: Classic Hovorka Simulation (TYPO FIXED HERE) ---
+        y0_h = [c_h.Dm1_0, c_h.Dm2_0, c_h.G_0, c_h.Gt_0, 0.0, 0.0, c_h.S1_0, c_h.S2_0, c_h.x1_0, c_h.x2_0, c_h.x3_0, c_h.I_0]
         sol_h = odeint(self.odes, y0_h, t_span, args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, c_h, "hovorka"), rtol=1e-6, atol=1e-8)
         G_hovorka = sol_h[:, 2]
 
@@ -200,7 +200,7 @@ class HovorkaModel:
             for spine in ax.spines.values():
                 spine.set_edgecolor('#3a3f4b')
 
-        # Top Plot: Flawless layout alignment match
+        # Top Plot: Linear matching
         ax1.plot(t, G_proposed, color='#1f77b4', linewidth=2.0, label='Proposed')
         ax1.plot(t, G_hovorka, color='#d62728', linewidth=1.5, linestyle='--', label='Hovorka')
         ax1.set_title('Blood Glucose Profile Comparison')
