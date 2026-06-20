@@ -18,6 +18,7 @@ class HovorkaConstants:
         # Rates from EGP model spec
         self.kp2 = 0.0007                   # Liver glucose effectiveness
         self.ke1 = 0.007                    # Glomerular filtration rate
+        self.EGP_b = 1.23                   # Basal EGP for classic Hovorka comparison
         
         # Insulin subsystem
         self.Vi = 0.12 * BW                 # Distribution volume of insulin (L)
@@ -53,7 +54,6 @@ class HovorkaConstants:
         self.delta = 0.98e-7                # Delta parameter
         self.Hb = 58.0e-7                   # Basal glucagon
 
-        # Explicitly assign both property variants
         self.u_basal = u_basal            
         self.u0 = u_basal
 
@@ -79,7 +79,6 @@ class HovorkaModel:
     def __init__(self, BW=70.0, u_basal=12.9127):
         self.c = HovorkaConstants(BW=BW, u_basal=u_basal)
         self.u_basal = u_basal
-        # BREAKING THE LOOP: Persistence tracking for derivative history step
         self.prev_dGdt = 0.0
 
     def meal_input(self, t, meal_times, meal_durations, meal_cho):
@@ -96,16 +95,15 @@ class HovorkaModel:
                 return bolus_values[i]
         return self.u_basal
 
-    def odes(self, y, t, meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration):
+    def odes(self, y, t, meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, model_type="proposed"):
         Dm1, Dm2, G, Gt, G6p, H, S1, S2, x1, x2, x3, I = y
         c = self.c
 
-        # Force physical bound protection to prevent underflow drops
         G = max(10.0, G)
         G6p = max(0.0, G6p)
         H = max(0.0, H)
 
-        # --- 1. Meal Absorption Subsystem ---
+        # --- 1. Meal Absorption ---
         d_cho = self.meal_input(t, meal_times, meal_durations, meal_cho)
         D_meal = 1000.0 * d_cho / c.Mwg
         
@@ -113,54 +111,55 @@ class HovorkaModel:
         dDm2 = Dm1 / c.tau_d - Dm2 / c.tau_d
         Ug = Dm2 / c.tau_d
 
-        # --- 2. Glucose Scaling & Kinetics ---
+        # --- 2. Glucose Scaling ---
         Ugc = 18.0 * Ug / c.Vg
         F01uc = 18.0 * c.F01 / c.Vg if G >= 81.0 else (18.0 * c.F01 * G) / (c.Vg * 81.0)
         Erc = c.ke1 * (G - c.Gth) if G >= c.Gth else 0.0
         
-        # --- 3. Stable EGP6 Hepatic Subsystem ---
-        E = (1.0 - np.tanh((t - c.tD) / c.tau)) / 2.0
-        Ggg = (c.Ggg1b + c.Sc * max(0.0, H - c.Hth)) * E
-        
-        # Using persistent step-state memory history to safely calculate switching boundaries
-        if self.prev_dGdt >= 0:
-            EGP_val = c.K6gp * G6p - x3 * self.prev_dGdt - c.kp2 * (G - c.Gb)
-        else:
-            EGP_val = c.K6gp * G6p - c.kp2 * (G - c.Gb)
+        # --- 3. Hepatic EGP Choice ---
+        if model_type == "proposed":
+            E = (1.0 - np.tanh((t - c.tD) / c.tau)) / 2.0
+            Ggg = (c.Ggg1b + c.Sc * max(0.0, H - c.Hth)) * E
             
-        EGPc = 18.0 * (EGP_val / c.Vg)
+            if self.prev_dGdt >= 0:
+                EGP_val = c.K6gp * G6p - x3 * self.prev_dGdt - c.kp2 * (G - c.Gb)
+            else:
+                EGP_val = c.K6gp * G6p - c.kp2 * (G - c.Gb)
+            EGPc = 18.0 * (EGP_val / c.Vg)
+            dG6p = -c.K6gp * G6p + Ggg + c.Ggng1b
+        else:
+            # Classic Hovorka baseline model: Direct exponential suppression via x3
+            EGP_val = c.EGP_b * np.exp(-x3)
+            EGPc = 18.0 * EGP_val / c.Vg
+            dG6p = 0.0
 
-        # --- 4. System Differential Expressions ---
+        # --- 4. Differential Expressions ---
         dG = Ugc - F01uc - Erc + (c.k12 * (Gt - c.Gb)) - (x1 * (G - c.Gb)) + EGPc
         dGt = (x1 * (G - c.Gb)) - ((c.k12 + x2) * (Gt - c.Gb))
-
-        dG6p = -c.K6gp * G6p + Ggg + c.Ggng1b
         
-        if G >= c.Gb:
-            Srhs = c.rho * (0.0 - c.n * c.Hb)
+        if model_type == "proposed":
+            if G >= c.Gb:
+                Srhs = c.rho * (0.0 - c.n * c.Hb)
+            else:
+                Srhb_calc = c.n * c.Hb
+                Srhs = c.rho * (0.0 - max(c.sigma * (c.Gth1 - G) / (I + 1.0) + Srhb_calc, 0.0))
+            Srhd = c.delta * max(-dG, 0.0)
+            dH = -c.n * H + (Srhs + Srhd)
         else:
-            Srhb_calc = c.n * c.Hb
-            Srhs = c.rho * (0.0 - max(c.sigma * (c.Gth1 - G) / (I + 1.0) + Srhb_calc, 0.0))
-            
-        Srhd = c.delta * max(-dG, 0.0)
-        Srh = Srhs + Srhd
-        dH = -c.n * H + Srh
+            dH = 0.0
 
-        # Subcutaneous Insulin Absorption
+        # Insulin Subcutaneous Channel
         u = self.insulin_input(t, bolus_times, bolus_values, bolus_duration)
         dS1 = u - S1 * c.k21
         dS2 = (c.k21 * S1) - ((c.kd + c.ka) * S2)
         Ui = S2 / c.tau_s
 
-        # Insulin Remote Action States
+        # Actions & Circulating Plasma Insulin
         dx1 = -c.ka1 * x1 + c.kb1 * I
         dx2 = -c.ka2 * x2 + c.kb2 * I
         dx3 = -c.ka3 * x3 + c.kb3 * I
-
-        # Circulating Plasma Insulin Compartment
         dI = Ui / c.Vi - c.ke * I
 
-        # Update step memory
         self.prev_dGdt = dG
 
         return [dDm1, dDm2, dG, dGt, dG6p, dH, dS1, dS2, dx1, dx2, dx3, dI]
@@ -168,30 +167,23 @@ class HovorkaModel:
     def simulate(self, meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration=5.0):
         c = self.c
         t_span = np.arange(0, c.MAX_TIME, c.h)
+        
+        # --- Run 1: Proposed Model Simulation ---
         self.prev_dGdt = 0.0
+        y0_p = [c.Dm1_0, c.Dm2_0, c.G_0, c.Gt_0, c.G6p_0, c.H_0, c.S1_0, c.S2_0, c.x1_0, c.x2_0, c.x3_0, c.I_0]
+        sol_p = odeint(self.odes, y0_p, t_span, args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, "proposed"), rtol=1e-6, atol=1e-8)
+        G_proposed = sol_p[:, 2]
+        I_proposed = sol_p[:, 11]
 
-        y0 = [
-            c.Dm1_0, c.Dm2_0,
-            c.G_0, c.Gt_0,
-            c.G6p_0, c.H_0,
-            c.S1_0, c.S2_0,
-            c.x1_0, c.x2_0, c.x3_0,
-            c.I_0
-        ]
+        # --- Run 2: Classic Hovorka Simulation ---
+        self.prev_dGdt = 0.0
+        y0_h = [c.Dm1_0, c.Dm2_0, c.G_0, c.Gt_0, 0.0, 0.0, c.S1_0, c.S2_0, c.x1_0, c.x2_0, c.x3_0, c.I_0]
+        sol_h = odeint(self.odes, y0_h, t_span, args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, "hovorka"), rtol=1e-6, atol=1e-8)
+        G_hovorka = sol_h[:, 2]
 
-        sol = odeint(
-            self.odes, y0, t_span,
-            args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration),
-            rtol=1e-6, atol=1e-8
-        )
+        return t_span, G_proposed, G_hovorka, I_proposed
 
-        G_mgdl = sol[:, 2]
-        I = sol[:, 11]
-        G_mmol = G_mgdl / 18.0182
-
-        return t_span, G_mmol, G_mgdl, I
-
-    def plot(self, t, G_mmol, G_mgdl, I):
+    def plot(self, t, G_proposed, G_hovorka, I):
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
         fig.patch.set_facecolor('#0e1117')
         for ax in (ax1, ax2):
@@ -203,21 +195,24 @@ class HovorkaModel:
             for spine in ax.spines.values():
                 spine.set_edgecolor('#3a3f4b')
 
-        ax1.axhspan(70, 180, alpha=0.12, color='#2ecc71', label='Normal range (70–180 mg/dL)')
-        ax1.plot(t, G_mgdl, color='#4fc3f7', linewidth=1.5, label='Plasma Glucose')
-        ax1.set_title('Blood Glucose Profile (EGP6 Hovorka Model)')
-        ax1.set_xlabel('Time (minutes)')
-        ax1.set_ylabel('Glucose (mg/dL)')
-        ax1.set_ylim(0, 350)  # Bound view to clear clinical window numbers
+        # Top Plot: Overlaid curves matching Mam's template exactly
+        ax1.plot(t, G_proposed, color='#1f77b4', linewidth=2.0, label='Proposed')
+        ax1.plot(t, G_hovorka, color='#d62728', linewidth=1.5, linestyle='--', label='Hovorka')
+        ax1.set_title('Blood Glucose Profile Comparison')
+        ax1.set_xlabel('Time (min)')
+        ax1.set_ylabel('Glucose (mg/dl)')
+        ax1.set_xlim(0, 1500)
+        ax1.set_ylim(50, 300)
         ax1.legend(facecolor='#1a1d27', edgecolor='#3a3f4b', loc='upper right')
-        ax1.grid(True, color='#2a2f3b', linestyle='--', alpha=0.5)
+        ax1.grid(True, color='#2a2f3b', linestyle=':', alpha=0.6)
 
+        # Bottom Plot: Plasma Insulin Actions
         ax2.plot(t, I, color='#ff7675', linewidth=1.5, label='Plasma Insulin')
         ax2.set_title('Plasma Insulin Profile')
-        ax2.set_xlabel('Time (minutes)')
+        ax2.set_xlabel('Time (min)')
         ax2.set_ylabel('Insulin (mU/L)')
         ax2.legend(facecolor='#1a1d27', edgecolor='#3a3f4b', loc='upper right')
-        ax2.grid(True, color='#2a2f3b', linestyle='--', alpha=0.5)
+        ax2.grid(True, color='#2a2f3b', linestyle=':', alpha=0.6)
 
         plt.tight_layout()
         return fig
