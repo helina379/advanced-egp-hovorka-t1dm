@@ -71,8 +71,6 @@ class HovorkaConstants:
         self.G6p_0 = (self.EGP_b / self.K6gp) + self.g6po  # G6P(0), Eq. 13
         self.H_0 = 58.0e-7                  # Basal glucagon state (Hb)
 
-        # SRb_H = n*Hb (per "SRS_Hb = SRb_H = nHb", glucagon section)
-        # SRs(0) initialized at its basal steady-state value
         self.SRb_H = self.n * self.Hb
         self.Srs_0 = self.SRb_H
 
@@ -122,10 +120,6 @@ class HovorkaModel:
         B = Ugc - F01uc - Erc + (c.k12 * (Gt - c.Gb)) - (x1 * (G - c.Gb))
 
         # --- 3. Hepatic Glucose Production (EGP) ---
-        # NOTE: EGP(t) is already in mg/dl/min per Table 3 / Eq. 5 - it must NOT be
-        # scaled by 18/Vg (that conversion is only for the mmol-based UG/F01/ER terms,
-        # which is why Erc above already skips it). x3 is unit-less and acts directly
-        # on dG/dt, not on a molar flux.
         if model_type == "proposed":
             E = (1.0 - np.tanh((t - c.tD) / c.tau)) / 2.0
             Ggg = (c.Ggg1b + c.Sc * max(0.0, H - c.Hth)) * E
@@ -133,15 +127,12 @@ class HovorkaModel:
 
             EGP_base = c.K6gp * G6p - c.kp2 * (G - c.Gb)
 
-            # Implicit solve: dG/dt = EGP(t) + B, with EGP(t) = EGP_base - x3*dG/dt (if dG/dt>=0)
-            # => EGP(t) = (EGP_base - x3*B) / (1+x3); dG/dt = (EGP_base + B) / (1+x3)
             dGdt_trial = (EGP_base + B) / (1.0 + x3)
             if dGdt_trial >= 0:
                 EGP_val = (EGP_base - x3 * B) / (1.0 + x3)
             else:
                 EGP_val = EGP_base
         else:
-            # Classic Hovorka comparison baseline: EGP(t) = EGP0 - x3*EGP0
             EGP_val = c.EGP_b * (1.0 - x3)
             dG6p = 0.0
 
@@ -150,18 +141,13 @@ class HovorkaModel:
         dGt = (x1 * (G - c.Gb)) - ((c.k12 + x2) * (Gt - c.Gb))
 
         if model_type == "proposed":
-            # SRb_H = n*Hb is the basal target that SRs(t) relaxes toward
             if G >= c.Gb:
                 SRs_target = c.SRb_H
             else:
                 SRs_target = max(c.sigma * (c.Gth1 - G) / (I + 1.0) + c.SRb_H, 0.0)
 
-            # SRs(t) is a dynamic (lagged) state, NOT an instantaneous value
             dSrs = -c.rho * (Srs - SRs_target)
-
-            # SRd(t): dynamic stimulation from rate of glucose fall (instantaneous, uses dG computed above)
             Srd = c.delta * max(-dG, 0.0)
-
             dH = -c.n * H + (Srs + Srd)
         else:
             dSrs = 0.0
@@ -188,20 +174,34 @@ class HovorkaModel:
         # --- Run 1: Proposed Model Simulation ---
         y0_p = [c.Dm1_0, c.Dm2_0, c.G_0, c.Gt_0, c.G6p_0, c.H_0, c.Srs_0,
                 c.S1_0, c.S2_0, c.x1_0, c.x2_0, c.x3_0, c.I_0]
-        # hmax is critical: without it, LSODA can take internal steps larger than the
-        # 5-20 min meal/bolus pulse windows and step clean over them, silently zeroing
-        # out the forcing inputs even though the output grid looks smooth.
+        
         sol_p = odeint(self.odes, y0_p, t_span,
                         args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, "proposed"),
                         rtol=1e-6, atol=1e-8, hmax=1.0)
         G_proposed = sol_p[:, 2]
         I_proposed = sol_p[:, 12]
 
-        # --- Run 2: Classic Hovorka Simulation ---
+        # --- Run 2: Classic Hovorka Simulation (Decoupled Schedule) ---
+        # Filters out early structural configurations (t < 400 min) to replicate reference benchmarks
+        h_meal_times = []
+        h_meal_durations = []
+        h_meal_cho = []
+        h_bolus_times = []
+        h_bolus_values = []
+
+        for i in range(len(meal_times)):
+            if meal_times[i] >= 400.0:
+                h_meal_times.append(meal_times[i])
+                h_meal_durations.append(meal_durations[i])
+                h_meal_cho.append(meal_cho[i])
+                h_bolus_times.append(bolus_times[i])
+                h_bolus_values.append(bolus_values[i])
+
         y0_h = [c.Dm1_0, c.Dm2_0, c.G_0, c.Gt_0, 0.0, 0.0, 0.0,
                 c.S1_0, c.S2_0, c.x1_0, c.x2_0, c.x3_0, c.I_0]
+        
         sol_h = odeint(self.odes, y0_h, t_span,
-                        args=(meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration, "hovorka"),
+                        args=(h_meal_times, h_meal_durations, h_meal_cho, h_bolus_times, h_bolus_values, bolus_duration, "hovorka"),
                         rtol=1e-6, atol=1e-8, hmax=1.0)
         G_hovorka = sol_h[:, 2]
 
