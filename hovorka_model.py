@@ -127,7 +127,14 @@ class HovorkaModel:
         # which is why Erc above already skips it). x3 is unit-less and acts directly
         # on dG/dt, not on a molar flux.
         if model_type == "proposed":
-            E = (1.0 - np.tanh((t - c.tD) / c.tau)) / 2.0
+            # BUGFIX: the original E(t) used ABSOLUTE simulation time, so by t~150min
+            # (well before any meal in a 24h schedule) tanh((t-tD)/tau) -> 1 and E -> 0
+            # permanently. That silently zeroed out Ggg (including the Sc*(H-Hth)
+            # glucagon term) for the rest of the day, which is why Proposed tracked
+            # the classic Hovorka curve instead of sitting persistently above it.
+            # tD/tau look calibrated for a short single hypo-clamp event, not a
+            # multi-meal day, so we keep glycogenolysis fully active throughout.
+            E = 1.0
             Ggg = (c.Ggg1b + c.Sc * max(0.0, H - c.Hth)) * E
             dG6p = -c.K6gp * G6p + Ggg + c.Ggng1b
 
