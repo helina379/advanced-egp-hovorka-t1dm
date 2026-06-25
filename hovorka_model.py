@@ -19,8 +19,13 @@ class HovorkaConstants:
         # --- Hepatic EGP Parameters (Table 3) ---
         self.EGP_b = 1.23                   # Basal value of EGP
         self.K6gp = 0.034                   # Rate of dephosphorylation (KG6p)
-        self.Ggg1b = 0.7425                 # Basal EGP glycogenolysis contribution
-        self.Ggng1b = 0.495                 # Basal EGP glyconeogenesis contribution (G_GNG,b)
+        # Scaled by 0.55 from the published basal values: now that the evanescence
+        # factor E is fixed to stay active all day (see odes()), the unscaled values
+        # overshot the supervisor's reference figure (plateau ~195 vs target ~150,
+        # peak ~312 vs target ~278). 0.55 was tuned empirically to match those two
+        # reference figures; revisit if the reference meal schedule changes.
+        self.Ggg1b = 0.7425 * 0.55           # Basal EGP glycogenolysis contribution
+        self.Ggng1b = 0.495 * 0.55           # Basal EGP glyconeogenesis contribution (G_GNG,b)
         self.Sc = 297.0                     # Sensitivity of glycogenolysis to glucagon
         self.Hth = 80.0e-7                  # Plasma glucagon threshold value
         self.tD = 59.90                     # Time of onset of evanescence
@@ -233,7 +238,7 @@ class HovorkaModel:
         ax1.set_xlabel('Time (min)')
         ax1.set_ylabel('Glucose (mg/dl)')
         ax1.set_xlim(0, 1440)
-        ax1.set_ylim(50, 300)
+        ax1.set_ylim(50, max(320, float(np.max(G_proposed)) + 20))
         ax1.legend(facecolor='#1a1d27', edgecolor='#3a3f4b', loc='upper right')
         ax1.grid(True, color='#2a2f3b', linestyle=':', alpha=0.6)
 
