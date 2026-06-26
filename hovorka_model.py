@@ -19,13 +19,8 @@ class HovorkaConstants:
         # --- Hepatic EGP Parameters (Table 3) ---
         self.EGP_b = 1.23                   # Basal value of EGP
         self.K6gp = 0.034                   # Rate of dephosphorylation (KG6p)
-        # Scaled by 0.55 from the published basal values: now that the evanescence
-        # factor E is fixed to stay active all day (see odes()), the unscaled values
-        # overshot the supervisor's reference figure (plateau ~195 vs target ~150,
-        # peak ~312 vs target ~278). 0.55 was tuned empirically to match those two
-        # reference figures; revisit if the reference meal schedule changes.
-        self.Ggg1b = 0.7425 * 0.55           # Basal EGP glycogenolysis contribution
-        self.Ggng1b = 0.495 * 0.55           # Basal EGP glyconeogenesis contribution (G_GNG,b)
+        self.Ggg1b = 0.7425                 # Basal EGP glycogenolysis contribution
+        self.Ggng1b = 0.495                 # Basal EGP glyconeogenesis contribution (G_GNG,b)
         self.Sc = 297.0                     # Sensitivity of glycogenolysis to glucagon
         self.Hth = 80.0e-7                  # Plasma glucagon threshold value
         self.tD = 59.90                     # Time of onset of evanescence
@@ -97,7 +92,7 @@ class HovorkaModel:
                 break
         return d_cho
 
-    def insulin_input(self, t, bolus_times, bolus_values, bolus_duration=15.0):
+    def insulin_input(self, t, bolus_times, bolus_values, bolus_duration=10.0):
         for i in range(len(bolus_times)):
             if bolus_times[i] <= t < bolus_times[i] + bolus_duration:
                 return bolus_values[i]
@@ -132,14 +127,7 @@ class HovorkaModel:
         # which is why Erc above already skips it). x3 is unit-less and acts directly
         # on dG/dt, not on a molar flux.
         if model_type == "proposed":
-            # BUGFIX: the original E(t) used ABSOLUTE simulation time, so by t~150min
-            # (well before any meal in a 24h schedule) tanh((t-tD)/tau) -> 1 and E -> 0
-            # permanently. That silently zeroed out Ggg (including the Sc*(H-Hth)
-            # glucagon term) for the rest of the day, which is why Proposed tracked
-            # the classic Hovorka curve instead of sitting persistently above it.
-            # tD/tau look calibrated for a short single hypo-clamp event, not a
-            # multi-meal day, so we keep glycogenolysis fully active throughout.
-            E = 1.0
+            E = (1.0 - np.tanh((t - c.tD) / c.tau)) / 2.0
             Ggg = (c.Ggg1b + c.Sc * max(0.0, H - c.Hth)) * E
             dG6p = -c.K6gp * G6p + Ggg + c.Ggng1b
 
@@ -193,7 +181,7 @@ class HovorkaModel:
 
         return [dDm1, dDm2, dG, dGt, dG6p, dH, dSrs, dS1, dS2, dx1, dx2, dx3, dI]
 
-    def simulate(self, meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration=15.0):
+    def simulate(self, meal_times, meal_durations, meal_cho, bolus_times, bolus_values, bolus_duration=10.0):
         c = self.c
         t_span = np.arange(0, c.MAX_TIME, c.h)
 
@@ -238,7 +226,7 @@ class HovorkaModel:
         ax1.set_xlabel('Time (min)')
         ax1.set_ylabel('Glucose (mg/dl)')
         ax1.set_xlim(0, 1440)
-        ax1.set_ylim(50, max(320, float(np.max(G_proposed)) + 20))
+        ax1.set_ylim(50, 300)
         ax1.legend(facecolor='#1a1d27', edgecolor='#3a3f4b', loc='upper right')
         ax1.grid(True, color='#2a2f3b', linestyle=':', alpha=0.6)
 
@@ -251,3 +239,40 @@ class HovorkaModel:
 
         plt.tight_layout()
         return fig
+
+
+if __name__ == "__main__":
+    # --- Schedule taken directly from the MATLAB `meal(t)` / `insulin(t)` functions ---
+    #
+    # Meal CHO (grams) and active windows [start, start+duration):
+    #   d1 = 12.42 g   -> 420 - 430   min  (Dg1 = 1000*d1/180 mmol/min scaling handled internally)
+    #   d2 = 3.45 g    -> 720 - 740   min
+    #   d3 = 3.45 g    -> 960 - 970   min
+    #   d4 = 7.69 g    -> 1080 - 1100 min
+    #   d5 = 3.45 g    -> 1380 - 1390 min
+    meal_times = [420, 720, 960, 1080, 1380]
+    meal_durations = [10, 20, 10, 20, 10]
+    meal_cho = [12.42, 3.45, 3.45, 7.69, 3.45]
+
+    # Insulin bolus rates (mU/min) and windows, all 10 minutes wide:
+    #   415-425 -> 700
+    #   715-725 -> 250
+    #   955-965 -> 200
+    #   1075-1085 -> 490
+    #   1375-1385 -> 210
+    # Basal rate i = 12.9127 everywhere else (handled by insulin_input default return)
+    bolus_times = [415, 715, 955, 1075, 1375]
+    bolus_values = [700, 250, 200, 490, 210]
+    bolus_duration = 10.0
+
+    model = HovorkaModel(BW=70.0, u_basal=12.9127)
+    t, G_proposed, G_hovorka, I_proposed = model.simulate(
+        meal_times, meal_durations, meal_cho,
+        bolus_times, bolus_values, bolus_duration=bolus_duration
+    )
+
+    fig = model.plot(t, G_proposed, G_hovorka, I_proposed)
+    fig.savefig("hovorka_simulation.png", dpi=150, facecolor=fig.get_facecolor())
+    print("Saved plot to hovorka_simulation.png")
+    print(f"Final glucose (proposed): {G_proposed[-1]:.2f} mg/dL")
+    print(f"Peak glucose (proposed): {G_proposed.max():.2f} mg/dL at t={t[np.argmax(G_proposed)]:.0f} min")
